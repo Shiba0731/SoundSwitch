@@ -1,4 +1,5 @@
-﻿#nullable enable
+﻿// SoundSwitch/Framework/Profile/ProfileManager.cs
+
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -23,7 +24,7 @@ using SoundSwitch.Util;
 
 namespace SoundSwitch.Framework.Profile
 {
-    public class ProfileManager
+    public class ProfileManager : IDisposable
     {
         public delegate void ShowError(string errorMessage, string errorTitle);
 
@@ -33,6 +34,7 @@ namespace SoundSwitch.Framework.Profile
         private readonly ShowError _showError;
         private readonly TriggerFactory _triggerFactory;
         private readonly NotificationManager.NotificationManager _notificationManager;
+        private readonly ApplicationExitMonitor _applicationExitMonitor; // 新しいフィールドを追加
 
         private Profile? _steamProfile;
         private Profile? _forcedProfile;
@@ -64,6 +66,10 @@ namespace SoundSwitch.Framework.Profile
             _notificationManager = notificationManager;
             _profileHotkeyManager = new(this);
             _logger = Log.ForContext(GetType());
+
+            // ApplicationExitMonitorの初期化とイベント購読
+            _applicationExitMonitor = new ApplicationExitMonitor();
+            _applicationExitMonitor.ApplicationExited += OnMonitoredApplicationExited;
         }
 
         private bool RegisterTriggers(Profile profile, bool onInit = false)
@@ -108,6 +114,11 @@ namespace SoundSwitch.Framework.Profile
 
                         SwitchAudio(profile);
                         return true;
+                    },
+                    () => // ApplicationExitTrigger の登録
+                    {
+                        _applicationExitMonitor.StartMonitoring(trigger.ApplicationPath);
+                        return true;
                     });
             }
 
@@ -124,7 +135,11 @@ namespace SoundSwitch.Framework.Profile
                     () => { _steamProfile = null; }, () => { },
                     () => { _profilesByUwpApp.Remove(trigger.WindowName.ToLower()); },
                     () => { },
-                    () => { _forcedProfile = null; });
+                    () => { _forcedProfile = null; },
+                    () => // ApplicationExitTrigger の登録解除
+                    {
+                        _applicationExitMonitor.StopMonitoring(trigger.ApplicationPath);
+                    });
             }
         }
 
@@ -190,6 +205,25 @@ namespace SoundSwitch.Framework.Profile
             {
                 if (HandleDeviceChanged(audioChangeEvent)) return;
             };
+        }
+
+        /// <summary>
+        /// 監視対象のアプリケーションが終了したときに呼び出されるイベントハンドラ
+        /// </summary>
+        private void OnMonitoredApplicationExited(object sender, ApplicationExitEventArgs e)
+        {
+            Log.Information("アプリケーションが終了しました: {ApplicationPath}。関連するプロファイルを確認中。", e.ApplicationPath);
+            // このアプリケーション終了によってトリガーされるプロファイルを見つける
+            var profilesToTrigger = Profiles.Where(p =>
+                p.Triggers.Any(t => t.Type == TriggerFactory.Enum.ApplicationExit &&
+                                    t.ApplicationPath.Equals(e.ApplicationPath, StringComparison.OrdinalIgnoreCase))
+            ).ToList();
+
+            foreach (var profile in profilesToTrigger)
+            {
+                Log.Information("アプリケーション終了: {ApplicationPath}により、プロファイル '{ProfileName}'をトリガーしています。", e.ApplicationPath, profile.Name);
+                SwitchAudio(profile);
+            }
         }
 
         private bool HandleUwpApp(WindowMonitor.Event @event)
@@ -508,7 +542,8 @@ namespace SoundSwitch.Framework.Profile
                     () => null,
                     () => string.Format(SettingsStrings.profile_error_window, trigger.WindowName),
                     () => null,
-                    () => null);
+                    () => null,
+                    () => string.Format(SettingsStrings.profile_error_application, trigger.ApplicationPath)); // ApplicationExitの重複チェック
                 if (error != null)
                 {
                     return error;
@@ -554,7 +589,22 @@ namespace SoundSwitch.Framework.Profile
                         return null;
                     },
                     () => null,
-                    () => _forcedProfile != null ? SettingsStrings.profile_error_deviceChanged : null);
+                    () => _forcedProfile != null ? SettingsStrings.profile_error_deviceChanged : null,
+                    () => // ApplicationExitのバリデーション
+                    {
+                        if (string.IsNullOrEmpty(trigger.ApplicationPath))
+                        {
+                            return SettingsStrings.profile_error_application; // パスが空の場合
+                        }
+                        // ここでは、同じアプリケーションパスを持つApplicationExitトリガーが既に存在するかどうかをチェックする
+                        // _applicationExitMonitorが内部で管理するため、ProfileManagerレベルでの重複チェックは不要かもしれないが、
+                        // UIでの設定時には重複を避けるべき。ここでは、設定済みのプロファイル全体をチェックする
+                        if (AppConfigs.Configuration.Profiles.Any(p => p.Id != profile.Id && p.Triggers.Any(t => t.Type == TriggerFactory.Enum.ApplicationExit && t.ApplicationPath.Equals(trigger.ApplicationPath, StringComparison.OrdinalIgnoreCase))))
+                        {
+                            return string.Format(SettingsStrings.profile_error_application, trigger.ApplicationPath);
+                        }
+                        return null;
+                    });
                 if (error != null)
                 {
                     return error;
@@ -566,6 +616,8 @@ namespace SoundSwitch.Framework.Profile
 
         private Result<string, VoidSuccess> ValidateAddProfile(ProfileSetting profile)
         {
+            // このメソッドは古いProfileSettingクラス用なので、ProfileManagerの現在のProfileクラスとは直接関係ありません。
+            // 互換性のために残しますが、新しいトリガータイプのバリデーションはValidateProfileメソッドで行われます。
             if (string.IsNullOrEmpty(profile.ProfileName))
             {
                 return SettingsStrings.profile_error_noName;
@@ -613,7 +665,7 @@ namespace SoundSwitch.Framework.Profile
         {
             var errors = new List<Profile>();
             var profiles = profilesToDelete.ToArray();
-            var resetProcessAudio = profiles.Any(profile => profile.Triggers.Any(trigger => trigger.Type == TriggerFactory.Enum.Process || trigger.Type == TriggerFactory.Enum.Window));
+            var resetProcessAudio = profiles.Any(profile => profile.Triggers.Any(trigger => trigger.Type == TriggerFactory.Enum.Application || trigger.Type == TriggerFactory.Enum.Window));
             foreach (var profile in profiles)
             {
                 if (!AppConfigs.Configuration.Profiles.Contains(profile))
@@ -686,6 +738,19 @@ namespace SoundSwitch.Framework.Profile
                     _logger.Error(e, "Couldn't get information about the given process.");
                 }
             }
+        }
+
+        /// <summary>
+        /// リソースを破棄します。
+        /// </summary>
+        public void Dispose()
+        {
+            if (_applicationExitMonitor != null)
+            {
+                _applicationExitMonitor.ApplicationExited -= OnMonitoredApplicationExited; // イベントハンドラを解除
+                _applicationExitMonitor.Dispose(); // ApplicationExitMonitorを破棄
+            }
+            // その他の既存のDisposeロジックがあればここに追加
         }
     }
 }

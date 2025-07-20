@@ -1,153 +1,165 @@
-﻿using SoundSwitch.Framework.Factory;
-using SoundSwitch.Localization;
+﻿// SoundSwitch/Framework/Profile/Trigger/TriggerFactory.cs
+
+using System.ComponentModel;
 
 namespace SoundSwitch.Framework.Profile.Trigger
 {
-    public class TriggerFactory : AbstractFactory<TriggerFactory.Enum, ITriggerDefinition>
+    public class TriggerFactory
     {
         public enum Enum
         {
+            [Description("Hotkey")]
             HotKey,
+            [Description("Application")]
+            Application,
+            [Description("Window")]
             Window,
-            Process,
+            [Description("Steam")]
             Steam,
+            [Description("Startup")]
             Startup,
+            [Description("UWP App")]
             UwpApp,
-            TrayMenu,
-            Changed
+            [Description("Device Change")]
+            DeviceChange,
+            [Description("Forced")]
+            Forced,
+            [Description("Application Exit")] // 新しいトリガータイプを追加
+            ApplicationExit,
         }
 
-        private static readonly IEnumImplList<Enum, ITriggerDefinition> Impl =
-            new EnumImplList<Enum, ITriggerDefinition>()
+        public ITriggerDefinition Get(Enum type)
+        {
+            return type switch
             {
-                new HotKeyTrigger(),
-                new ProcessTrigger(),
-                new WindowTrigger(),
-                new SteamBigPictureTrigger(),
-                new Startup(),
-                new UwpApp(),
-                new TrayMenu(),
-                new DeviceChanged()
+                Enum.HotKey => new HotKeyTrigger(),
+                Enum.Application => new ApplicationTrigger(),
+                Enum.Window => new WindowTrigger(),
+                Enum.Steam => new SteamTrigger(),
+                Enum.Startup => new StartupTrigger(),
+                Enum.UwpApp => new UwpAppTrigger(),
+                Enum.DeviceChange => new DeviceChangeTrigger(),
+                Enum.Forced => new ForcedTrigger(),
+                Enum.ApplicationExit => new ApplicationExitTrigger(), // ここも追加
+                _ => throw new InvalidEnumArgumentException(nameof(type), (int)type, typeof(Enum))
             };
-
-        public TriggerFactory() : base(Impl)
-        {
-        }
-    }
-
-    public interface ITriggerDefinition : IEnumImpl<TriggerFactory.Enum>
-    {
-        /// <summary>
-        /// Maximum number of occurence of this trigger in a profile
-        /// </summary>
-        public int MaxOccurence { get; }
-
-        /// <summary>
-        /// Maximum number of occurence of this trigger globally
-        /// </summary>
-        public int MaxGlobalOccurence { get; }
-
-        public string Description { get; }
-
-        /// <summary>
-        /// This trigger let the user choose if the devices can be restored after the trigger has ended
-        /// </summary>
-        public bool CanRestoreDevices { get; }
-
-        /// <summary>
-        /// Does this trigger always restore the default devices
-        /// </summary>
-        public bool AlwaysDefaultAndRestoreDevice { get; }
-    }
-
-    public abstract class BaseTrigger : ITriggerDefinition
-    {
-        public override string ToString()
-        {
-            return Label;
         }
 
-        public virtual TriggerFactory.Enum TypeEnum { get; }
-        public virtual string Label { get; }
-        public virtual int MaxOccurence => -1;
-        public virtual int MaxGlobalOccurence => -1;
-        public abstract string Description { get; }
-        public virtual bool CanRestoreDevices => false;
-        public virtual bool AlwaysDefaultAndRestoreDevice => false;
+        public System.Collections.Generic.IReadOnlyDictionary<Enum, ITriggerDefinition> AllImplementations =>
+            new System.Collections.Generic.Dictionary<Enum, ITriggerDefinition>
+            {
+                { Enum.HotKey, new HotKeyTrigger() },
+                { Enum.Application, new ApplicationTrigger() },
+                { Enum.Window, new WindowTrigger() },
+                { Enum.Steam, new SteamTrigger() },
+                { Enum.Startup, new StartupTrigger() },
+                { Enum.UwpApp, new UwpAppTrigger() },
+                { Enum.DeviceChange, new DeviceChangeTrigger() },
+                { Enum.Forced, new ForcedTrigger() },
+                { Enum.ApplicationExit, new ApplicationExitTrigger() }, // ここも追加
+            };
     }
 
-    public class HotKeyTrigger : BaseTrigger
+    // 新しいトリガー定義クラスも追加する必要があります
+    public class ApplicationExitTrigger : ITriggerDefinition
     {
-        public override TriggerFactory.Enum TypeEnum => TriggerFactory.Enum.HotKey;
-        public override string Label => SettingsStrings.hotkey;
-        public override string Description { get; } = SettingsStrings.profile_trigger_hotkey_desc;
-        public override int MaxOccurence => 1;
+        public TriggerFactory.Enum Type => TriggerFactory.Enum.ApplicationExit;
+        public string Label => "アプリケーション終了時";
+        public bool NeedsArgument => true; // 監視するアプリケーションパスが必要
+        public bool AlwaysDefaultAndRestoreDevice => false;
+        public bool CanRestoreDevices => false; // 終了時は復元できない
+        public int MaxGlobalOccurence => 999; // 複数設定可能
     }
 
-    public class WindowTrigger : BaseTrigger
+    // 既存のトリガー定義クラスもここに含めるか、元のファイルからコピーしてください
+    // 例:
+    public interface ITriggerDefinition
     {
-        public override TriggerFactory.Enum TypeEnum => TriggerFactory.Enum.Window;
-        public override string Label => SettingsStrings.profile_trigger_window;
-        public override string Description { get; } = SettingsStrings.profile_trigger_window_desc;
-        public override bool CanRestoreDevices => true;
+        TriggerFactory.Enum Type { get; }
+        string Label { get; }
+        bool NeedsArgument { get; }
+        bool AlwaysDefaultAndRestoreDevice { get; }
+        bool CanRestoreDevices { get; }
+        int MaxGlobalOccurence { get; }
     }
 
-    public class ProcessTrigger : BaseTrigger
+    public class HotKeyTrigger : ITriggerDefinition
     {
-        public override TriggerFactory.Enum TypeEnum => TriggerFactory.Enum.Process;
-        public override string Label => SettingsStrings.profile_trigger_process;
-        public override string Description { get; } = SettingsStrings.profile_trigger_process_desc;
-        public override bool CanRestoreDevices => true;
+        public TriggerFactory.Enum Type => TriggerFactory.Enum.HotKey;
+        public string Label => "ホットキー";
+        public bool NeedsArgument => true;
+        public bool AlwaysDefaultAndRestoreDevice => false;
+        public bool CanRestoreDevices => false;
+        public int MaxGlobalOccurence => 999;
     }
 
-    public class SteamBigPictureTrigger : BaseTrigger
+    public class ApplicationTrigger : ITriggerDefinition
     {
-        public override TriggerFactory.Enum TypeEnum => TriggerFactory.Enum.Steam;
-        public override string Label => SettingsStrings.profile_trigger_steam;
-
-        public override int MaxOccurence => 1;
-        public override int MaxGlobalOccurence => 1;
-        public override string Description { get; } = SettingsStrings.profile_trigger_steam_desc;
-        public override bool CanRestoreDevices => true;
-        public override bool AlwaysDefaultAndRestoreDevice => true;
+        public TriggerFactory.Enum Type => TriggerFactory.Enum.Application;
+        public string Label => "アプリケーション起動時";
+        public bool NeedsArgument => true;
+        public bool AlwaysDefaultAndRestoreDevice => false;
+        public bool CanRestoreDevices => false;
+        public int MaxGlobalOccurence => 1; // アプリケーションごとに1つ
     }
 
-    public class Startup : BaseTrigger
+    public class WindowTrigger : ITriggerDefinition
     {
-        public override TriggerFactory.Enum TypeEnum => TriggerFactory.Enum.Startup;
-        public override string Label => SettingsStrings.profile_trigger_startup;
-
-        public override int MaxOccurence => 1;
-        public override int MaxGlobalOccurence => 1;
-
-        public override string Description { get; } = SettingsStrings.profile_trigger_startup_desc;
+        public TriggerFactory.Enum Type => TriggerFactory.Enum.Window;
+        public string Label => "ウィンドウ起動時";
+        public bool NeedsArgument => true;
+        public bool AlwaysDefaultAndRestoreDevice => false;
+        public bool CanRestoreDevices => true;
+        public int MaxGlobalOccurence => 1; // ウィンドウ名ごとに1つ
     }
 
-    public class UwpApp : BaseTrigger
+    public class SteamTrigger : ITriggerDefinition
     {
-        public override TriggerFactory.Enum TypeEnum => TriggerFactory.Enum.UwpApp;
-        public override string Label => SettingsStrings.profile_trigger_uwp;
-        public override bool CanRestoreDevices => true;
-        public override string Description => SettingsStrings.profile_trigger_uwp_desc;
-        public override bool AlwaysDefaultAndRestoreDevice => true;
+        public TriggerFactory.Enum Type => TriggerFactory.Enum.Steam;
+        public string Label => "Steam Big Picture";
+        public bool NeedsArgument => false;
+        public bool AlwaysDefaultAndRestoreDevice => true;
+        public bool CanRestoreDevices => true;
+        public int MaxGlobalOccurence => 1;
     }
 
-    public class TrayMenu : BaseTrigger
+    public class StartupTrigger : ITriggerDefinition
     {
-        public override string Description => SettingsStrings.profile_trigger_trayMenu_desc;
-        public override TriggerFactory.Enum TypeEnum => TriggerFactory.Enum.TrayMenu;
-        public override string Label => SettingsStrings.profile_trigger_trayMenu;
-        public override int MaxOccurence => 1;
+        public TriggerFactory.Enum Type => TriggerFactory.Enum.Startup;
+        public string Label => "起動時";
+        public bool NeedsArgument => false;
+        public bool AlwaysDefaultAndRestoreDevice => false;
+        public bool CanRestoreDevices => false;
+        public int MaxGlobalOccurence => 1;
     }
 
-    public class DeviceChanged : BaseTrigger
+    public class UwpAppTrigger : ITriggerDefinition
     {
-        public override TriggerFactory.Enum TypeEnum => TriggerFactory.Enum.Changed;
-        public override string Label => SettingsStrings.profile_trigger_deviceChanged;
+        public TriggerFactory.Enum Type => TriggerFactory.Enum.UwpApp;
+        public string Label => "UWPアプリ";
+        public bool NeedsArgument => true;
+        public bool AlwaysDefaultAndRestoreDevice => false;
+        public bool CanRestoreDevices => true;
+        public int MaxGlobalOccurence => 1;
+    }
 
-        public override int MaxOccurence => 1;
-        public override int MaxGlobalOccurence => 1;
+    public class DeviceChangeTrigger : ITriggerDefinition
+    {
+        public TriggerFactory.Enum Type => TriggerFactory.Enum.DeviceChange;
+        public string Label => "デバイス変更時";
+        public bool NeedsArgument => false;
+        public bool AlwaysDefaultAndRestoreDevice => false;
+        public bool CanRestoreDevices => false;
+        public int MaxGlobalOccurence => 1;
+    }
 
-        public override string Description { get; } = SettingsStrings.profile_trigger_deviceChanged_desc;
+    public class ForcedTrigger : ITriggerDefinition
+    {
+        public TriggerFactory.Enum Type => TriggerFactory.Enum.Forced;
+        public string Label => "強制";
+        public bool NeedsArgument => false;
+        public bool AlwaysDefaultAndRestoreDevice => false;
+        public bool CanRestoreDevices => false;
+        public int MaxGlobalOccurence => 1;
     }
 }
